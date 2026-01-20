@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # build steps ...
-      - uses: Himenon/diff-artifacts/upload@v1.0.0
+      - uses: Himenon/diff-artifacts/upload@v1.1.0
         with:
           path: dist/
 ```
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # build steps ...
-      - uses: Himenon/upload-diff-artifact@v1.0.0
+      - uses: Himenon/diff-artifact/upload@v1.1.0
         with:
           path: |
             apps/web/dist
