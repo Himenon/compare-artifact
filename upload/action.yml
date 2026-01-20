@@ -1,0 +1,33 @@
+name: "Upload Diff Artifact"
+description: "Upload build artifacts with git commit SHA for comparing differences between branches"
+
+inputs:
+  prefix:
+    description: "Name of the artifact to upload (SHA will be appended automatically)"
+    required: false
+    default: "diff-artifacts"
+  path:
+    description: "Path to the directory or file to upload"
+    required: true
+
+outputs:
+  sha-short:
+    description: "Short SHA of the current commit"
+    value: ${{ steps.vars.outputs.sha_short }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set short SHA
+      id: vars
+      shell: bash
+      # Use PR head SHA instead of merge commit SHA for pull requests.
+      # For regular push events, falls back to github.sha.
+      run: echo "sha_short=$(echo ${{ github.event.pull_request.head.sha || github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+    - name: Upload build directory
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      with:
+        name: ${{ inputs.prefix }}-${{ steps.vars.outputs.sha_short }}
+        path: ${{ inputs.path }}
+        if-no-files-found: error
+        include-hidden-files: true
