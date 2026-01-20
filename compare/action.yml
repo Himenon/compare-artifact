@@ -189,7 +189,7 @@ runs:
     - name: Compare Artifacts
       id: compare
       if: steps.download_main.outcome == 'success'
-      run: ${{ github.action_path }}/dist/compare-artifacts.sh
+      run: ${{ github.action_path }}/compare-artifacts.sh
       shell: bash
       env:
         COMMENT_MARKER: ${{ inputs.comment-marker }}
