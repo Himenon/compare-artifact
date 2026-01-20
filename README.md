@@ -35,7 +35,7 @@ jobs:
   compare:
     runs-on: ubuntu-latest
     steps:
-      - uses: Himenon/diff-artifacts@v1.0.0
+      - uses: Himenon/diff-artifacts/compare@v1.0.0
         with:
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -57,12 +57,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # build steps ...
-      - uses: Himenon/upload-diff-artifact@v1.0.0
+      - uses: Himenon/diff-artifact/upload@v1.0.0
         with:
           path: dist/
 ```
 
-**Auto-close PRs**
+**Auto-close PRs created by diff-artifacts**
 
 ```yaml
 on:
@@ -73,7 +73,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-slim
     steps:
-      - uses: Himenon/close-diff-artifact-pr@v1.0.0
+      - uses: Himenon/diff-artifact/pr-close@v1.0.0
         with:
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -81,15 +81,9 @@ jobs:
           diff-viewer-repo-name: "your-diff-viewer-repo"
 ```
 
-## Related
-
-- [Himenon/diff-artifacts](https://github.com/Himenon/diff-artifacts)
-- [Himenon/upload-diff-artifact](https://github.com/Himenon/upload-diff-artifact)
-- [Himenon/close-diff-artifact-pr](https://github.com/Himenon/close-diff-artifact-pr)
-
 ## Developer's Notes
 
-For production use, we recommend cloning the [related repositories](#related) or forking them within your organization for customization. The default options are designed to work with minimal configuration and are not intended for complex workflows.
+For production use, we recommend cloning this repository or forking it within your organization for customization. The default options are designed to work with minimal configuration and are not intended for complex workflows.
 
 ## License
 

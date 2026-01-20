@@ -1,4 +1,4 @@
-# Himenon/diff-artifacts/pr-auto-close
+# Himenon/diff-artifacts/pr-close
 
 A GitHub Action to automatically close Pull Requests created by [Himenon/diff-artifacts](https://github.com/Himenon/diff-artifacts).
 
@@ -18,7 +18,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-slim
     steps:
-      - uses: Himenon/diff-artifacts/pr-auto-close@v1.0.0
+      - uses: Himenon/diff-artifacts/pr-close@v1.0.0
         with:
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
