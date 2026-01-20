@@ -35,7 +35,7 @@ jobs:
   compare:
     runs-on: ubuntu-latest
     steps:
-      - uses: Himenon/diff-artifacts@v1.0.0
+      - uses: Himenon/diff-artifacts/compare@v1.0.0
         with:
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # ビルドステップ ...
-      - uses: Himenon/upload-diff-artifact@v1.0.0
+      - uses: Himenon/diff-artifact/upload@v1.0.0
         with:
           path: dist/
 ```
@@ -73,7 +73,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-slim
     steps:
-      - uses: Himenon/close-diff-artifact-pr@v1.0.0
+      - uses: Himenon/diff-artifact/pr-auto-close@v1.0.0
         with:
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -81,15 +81,9 @@ jobs:
           diff-viewer-repo-name: "your-diff-viewer-repo"
 ```
 
-## 関連リポジトリ
-
-- [Himenon/diff-artifacts](https://github.com/Himenon/diff-artifacts)
-- [Himenon/upload-diff-artifact](https://github.com/Himenon/upload-diff-artifact)
-- [Himenon/close-diff-artifact-pr](https://github.com/Himenon/close-diff-artifact-pr)
-
 ## 開発者向けメモ
 
-実際のプロダクトで使用する際は[関連するリポジトリ](#関連リポジトリ)をCloneしたり、組織内にForkしてカスタマイズして利用することをおすすめします。デフォルトのオプションは最小構成で動作するように設計されており、複雑なワークフローに対応することを想定して作られていないためです。
+実際のプロダクトで使用する際はリポジトリをCloneしたり、組織内にForkしてカスタマイズして利用することをおすすめします。デフォルトのオプションは最小構成で動作するように設計されており、複雑なワークフローに対応することを想定して作られていないためです。
 
 ## ライセンス
 
