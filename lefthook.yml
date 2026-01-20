@@ -1,0 +1,10 @@
+pre-commit:
+  jobs:
+    - name: prettier format
+      glob: "*.{md}"
+      run: pnpm run format:prettier
+      stage_fixed: true
+    - name: sort package json
+      glob: "package.json"
+      run: pnpm exec sort-package-json {staged_files}
+      stage_fixed: true

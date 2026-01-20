@@ -1,0 +1,293 @@
+name: "Diff Artifact"
+description: "Diff artifact differences per Pull Request."
+
+inputs:
+  app-id:
+    description: "GitHub App ID for generating token"
+    required: true
+  app-private-key:
+    description: "GitHub App Private Key for generating token"
+    required: true
+  diff-viewer-owner:
+    description: "Owner of the diff viewer repository"
+    required: true
+  diff-viewer-repo-name:
+    description: "Name of the diff viewer repository (without owner)"
+    required: true
+  pre-push-shell:
+    description: "Shell command to run before pushing diff (e.g., 'pnpm exec oxfmt')"
+    required: false
+    default: ""
+  prefix:
+    description: "Common prefix for artifact names and branch names (e.g., 'build'). Used for: base artifact name (prefix-{sha}), PR artifact name (prefix-{pr-number}), and branch prefixes in diff-viewer repository"
+    required: false
+    default: "diff-artifacts"
+  github-token:
+    description: "GitHub token for API access. Required permissions: 'actions: read' (to download artifacts), 'pull-requests: write' (to post comments), 'contents: read' (to access repository). Defaults to github.token if not specified."
+    required: false
+    default: ""
+  pr-sha:
+    description: "Pull Request commit SHA (short, 7 characters). Defaults to PR head SHA or current commit SHA if not specified."
+    required: false
+    default: ""
+  base-ref:
+    description: "Base branch reference (e.g., 'main'). Defaults to the PR's base branch if not specified."
+    required: false
+    default: ""
+  github-server-url:
+    description: "GitHub server URL (e.g., 'https://github.com' or 'https://github.example.com' for GitHub Enterprise)"
+    required: false
+    default: "https://github.com"
+  gitignore-patterns:
+    description: "Gitignore patterns to exclude from diff (space-separated)"
+    required: false
+    default: ""
+  comment-marker:
+    description: "HTML comment marker to identify diff comments in PR"
+    required: false
+    default: "<!-- build-artifacts-diff -->"
+  base-artifact-path:
+    description: "Path to download base artifact"
+    required: false
+    default: ".diff-artifacts/base"
+  pr-artifact-path:
+    description: "Path to download PR artifact"
+    required: false
+    default: ".diff-artifacts/pr"
+
+outputs:
+  diff-url:
+    description: "URL to the diff viewer Pull Request"
+    value: ${{ steps.compare.outputs.DIFF_URL }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate diff-viewer repository
+      run: |
+        CURRENT_REPO="${{ github.repository }}"
+        DIFF_VIEWER_REPO="${{ inputs.diff-viewer-owner }}/${{ inputs.diff-viewer-repo-name }}"
+
+        if [ "$CURRENT_REPO" = "$DIFF_VIEWER_REPO" ]; then
+          echo "❌ Error: diff-viewer repository cannot be the same as the current repository"
+          echo ""
+          echo "Current repository: $CURRENT_REPO"
+          echo "Diff-viewer repository: $DIFF_VIEWER_REPO"
+          echo ""
+          echo "⚠️  This action performs force push operations to the diff-viewer repository."
+          echo "Using the same repository would overwrite your production code and cause data loss."
+          echo ""
+          echo "Please specify a different repository for diff-viewer-owner and diff-viewer-repo-name."
+          exit 1
+        fi
+
+        echo "✓ Repository validation passed"
+        echo "  Current: $CURRENT_REPO"
+        echo "  Diff-viewer: $DIFF_VIEWER_REPO"
+      shell: bash
+
+    - name: Setup Git Config
+      run: |
+        git config --global core.autocrlf false
+        git config --global core.eol lf
+        git config --global user.email "actions@github.com"
+        git config --global user.name "gh-actions"
+      shell: bash
+
+    - name: Generate GitHub App Token
+      id: generate-token
+      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.app-private-key }}
+        owner: ${{ inputs.diff-viewer-owner }}
+        repositories: ${{ inputs.diff-viewer-repo-name }}
+
+    - name: "[pr] Get PR SHA"
+      id: pr_info
+      run: |
+        # Use inputs.pr-sha if provided, otherwise fall back to github.event.pull_request.head.sha or github.sha
+        PR_SHA="${{ inputs.pr-sha }}"
+        if [ -z "$PR_SHA" ]; then
+          FULL_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          PR_SHA=$(echo $FULL_SHA | cut -c1-7)
+        fi
+        echo "✓ PR commit SHA (short): $PR_SHA"
+        echo "sha_short=$PR_SHA" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: "[base] Get base branch SHA"
+      id: base_info
+      run: |
+        # Use PR base commit SHA (the commit the PR is comparing against)
+        BASE_SHA="${{ github.event.pull_request.base.sha }}"
+
+        if [ -z "$BASE_SHA" ]; then
+          echo "⚠️  github.event.pull_request.base.sha is not available"
+          # Use inputs.base-ref if provided, otherwise fall back to github.base_ref
+          BASE_REF="${{ inputs.base-ref }}"
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF="${{ github.base_ref }}"
+          fi
+          echo "Falling back to branch HEAD: $BASE_REF"
+          git fetch origin $BASE_REF
+          BASE_SHA=$(git rev-parse origin/$BASE_REF)
+        fi
+
+        SHA_SHORT=$(echo $BASE_SHA | cut -c1-7)
+        echo "✓ Base commit SHA: $BASE_SHA (short: $SHA_SHORT)"
+        echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: "[base] Get artifact workflow run ID"
+      id: base_run
+      continue-on-error: true
+      run: |
+        ARTIFACT_NAME="${{ inputs.prefix }}-${{ steps.base_info.outputs.sha_short }}"
+        echo "🔍 Searching for artifact: $ARTIFACT_NAME"
+
+        # Get all artifacts and filter
+        ARTIFACTS_JSON=$(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100")
+
+        if [ $? -ne 0 ]; then
+          echo "❌ Failed to fetch artifacts from GitHub API"
+          echo "$ARTIFACTS_JSON"
+          exit 0
+        fi
+
+        # Find matching artifact
+        RUN_ID=$(echo "$ARTIFACTS_JSON" | jq -r ".artifacts[] | select(.name == \"$ARTIFACT_NAME\" and .expired == false) | .workflow_run.id" | head -n 1)
+
+        if [ -z "$RUN_ID" ]; then
+          echo "⚠️  No matching artifact found with name: $ARTIFACT_NAME"
+          echo "run_id=" >> $GITHUB_OUTPUT
+        else
+          echo "✓ Found artifact with run_id: $RUN_ID"
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+        fi
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+
+    - name: "[base] Download Artifact"
+      id: download_main
+      if: steps.base_run.outputs.run_id != ''
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      continue-on-error: true
+      with:
+        name: ${{ inputs.prefix }}-${{ steps.base_info.outputs.sha_short }}
+        path: ${{ inputs.base-artifact-path }}
+        run-id: ${{ steps.base_run.outputs.run_id }}
+        github-token: ${{ inputs.github-token || github.token }}
+
+    - name: "[pr] Download Artifact"
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        name: ${{ inputs.prefix }}-${{ steps.pr_info.outputs.sha_short }}
+        path: ${{ inputs.pr-artifact-path }}
+
+    - name: Compare Artifacts
+      id: compare
+      if: steps.download_main.outcome == 'success'
+      run: ${{ github.action_path }}/dist/compare-artifacts.sh
+      shell: bash
+      env:
+        COMMENT_MARKER: ${{ inputs.comment-marker }}
+        BASE_SHA_SHORT: ${{ steps.base_info.outputs.sha_short }}
+        PR_SHA: ${{ steps.pr_info.outputs.sha_short }}
+        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        DIFF_VIEWER_REPO: ${{ inputs.diff-viewer-owner }}/${{ inputs.diff-viewer-repo-name }}
+        BASE_DIR: ${{ inputs.base-artifact-path }}
+        PR_DIR: ${{ inputs.pr-artifact-path }}
+        GITIGNORE_PATTERNS: ${{ inputs.gitignore-patterns }}
+        PRE_PUSH_SHELL: ${{ inputs.pre-push-shell }}
+        BASE_BRANCH_PREFIX: ${{ inputs.prefix }}
+        PR_BRANCH_PREFIX: ${{ inputs.prefix }}
+        GITHUB_SERVER_URL: ${{ inputs.github-server-url }}
+
+    - name: Post No Comparison Comment
+      if: steps.download_main.outcome != 'success'
+      run: |
+        BODY="⚠️ **Artifact comparison skipped**
+
+        Base artifact \`${{ inputs.prefix }}-${{ steps.base_info.outputs.sha_short }}\` was not found. This could be because:
+        - This is the first time using this action and no base branch artifact has been uploaded yet
+        - The artifact has expired (default retention: 90 days)
+        - The workflow hasn't run on the base branch yet
+        - The artifact name doesn't match
+
+        Please ensure the base branch workflow has completed successfully.
+
+        <!-- build-artifacts-diff -->"
+
+        # Search for existing comment (identified by marker)
+        COMMENT_ID=$(gh api repos/$GH_REPO/issues/$NUMBER/comments \
+          --jq ".[] | select(.body | contains(\"$COMMENT_MARKER\")) | .id" \
+          2>/dev/null | head -n 1)
+
+        if [ -n "$COMMENT_ID" ]; then
+          # Update existing comment
+          gh api repos/$GH_REPO/issues/comments/$COMMENT_ID -X PATCH -f body="$BODY" --silent > /dev/null 2>&1
+          echo "Updated existing comment #$COMMENT_ID"
+        else
+          # Create new comment
+          gh pr comment "$NUMBER" --body "$BODY" > /dev/null 2>&1
+          echo "Created new comment"
+        fi
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+        GH_REPO: ${{ github.repository }}
+        NUMBER: ${{ github.event.pull_request.number }}
+        COMMENT_MARKER: ${{ inputs.comment-marker }}
+
+    - name: Post Comment
+      if: steps.compare.outcome == 'success'
+      run: |
+        BODY=$(cat summary.md)
+
+        # Replace DIFF_URL placeholder with actual URL
+        if [ -n "$DIFF_URL" ]; then
+          DIFF_LINK="🔗 **View full diff: $DIFF_URL**"
+          BODY="${BODY//\{\{DIFF_URL\}\}/$DIFF_LINK}"
+        else
+          # Remove placeholder if DIFF_URL is not available
+          BODY="${BODY//\{\{DIFF_URL\}\}/}"
+        fi
+
+        # Append marker at the end of comment
+        BODY="${BODY}"$'\n'"${COMMENT_MARKER}"
+
+        # Search for existing comment (identified by marker)
+        COMMENT_ID=$(gh api repos/$GH_REPO/issues/$NUMBER/comments \
+          --jq ".[] | select(.body | contains(\"$COMMENT_MARKER\")) | .id" \
+          2>/dev/null | head -n 1)
+
+        if [ -n "$COMMENT_ID" ]; then
+          # Update existing comment
+          if gh api repos/$GH_REPO/issues/comments/$COMMENT_ID -X PATCH -f body="$BODY" > /dev/null 2>&1; then
+            echo "Updated existing comment #$COMMENT_ID"
+            echo "Diff URL: $DIFF_URL"
+          else
+            echo "Error: Failed to update comment (Comment ID: $COMMENT_ID)"
+            exit 1
+          fi
+        else
+          # Create new comment
+          if gh pr comment "$NUMBER" --body "$BODY" > /dev/null 2>&1; then
+            echo "Created new comment"
+            echo "Diff URL: $DIFF_URL"
+          else
+            echo "Error: Failed to create comment (PR: $NUMBER)"
+            exit 1
+          fi
+        fi
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+        GH_REPO: ${{ github.repository }}
+        NUMBER: ${{ github.event.pull_request.number }}
+        DIFF_URL: ${{ steps.compare.outputs.DIFF_URL }}
+        COMMENT_MARKER: ${{ inputs.comment-marker }}
