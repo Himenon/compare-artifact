@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # build steps ...
-      - uses: Himenon/diff-artifact/upload@v1.1.0
+      - uses: Himenon/diff-artifacts/upload@v1.1.0
         with:
           path: dist/
 ```
@@ -73,7 +73,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-slim
     steps:
-      - uses: Himenon/diff-artifact/close-pr@v1.1.0
+      - uses: Himenon/diff-artifacts/close-pr@v1.1.0
         with:
           app-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
